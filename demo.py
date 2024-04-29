@@ -93,17 +93,14 @@ def main_worker():
 
         train_dataset = dataset(train_data, train_labels, trans=train_transform)
         
-        # Define your class weights
-        class_weights = torch.tensor([0.7, 0.3])
-
-        # Ensure train_labels only contains 0 and 1
-        train_labels = (train_labels == args.pos_class).long()
-
-        # Get the weights for each sample
-        samples_weight = class_weights[train_labels]
-
-        # Create the sampler
-        sampler = WeightedRandomSampler(samples_weight, len(samples_weight))
+        class_weights = [1, 564]
+        sample_weights = [0] * len(train_dataset)
+        
+        for i, (data, label) in enumerate(train_dataset):
+            class_weight = class_weights[label]
+            sample_weights[i] = class_weight
+            
+        sampler = WeightedRandomSampler(sample_weights, len(sample_weights), replacement=True)
 
         train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=args.train_batchsize, sampler=sampler, num_workers=0)
 
