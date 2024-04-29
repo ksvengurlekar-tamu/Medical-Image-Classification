@@ -1,10 +1,14 @@
 import os
+
+from tqdm import tqdm
 import torch
 import torchvision
 from torchvision import transforms
 import numpy as np
 from arguments import args
 from sklearn import metrics
+
+
 torch.backends.cudnn.deterministic=True
 torch.backends.cudnn.benchmark=False
 torch.manual_seed(2024)
@@ -52,6 +56,8 @@ def main_worker():
 
     import medmnist 
     from medmnist import INFO, Evaluator
+    from torch.utils.data import WeightedRandomSampler
+
     root = '/content/drive/Shareddrives/CSCE421_Final_Project/code/data'
     info = INFO[args.data]
     DataClass = getattr(medmnist, info['python_class'])
@@ -86,33 +92,36 @@ def main_worker():
         train_labels = torch.tensor(train_labels) 
 
         train_dataset = dataset(train_data, train_labels, trans=train_transform)
-        train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=args.train_batchsize, shuffle=True, num_workers=0)
+        
+        # Define your class weights
+        class_weights = torch.tensor([0.7, 0.3])
+
+        # Ensure train_labels only contains 0 and 1
+        train_labels = (train_labels == args.pos_class).long()
+
+        # Get the weights for each sample
+        samples_weight = class_weights[train_labels]
+
+        # Create the sampler
+        sampler = WeightedRandomSampler(samples_weight, len(samples_weight))
+
+        train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=args.train_batchsize, sampler=sampler, num_workers=0)
 
     from libauc.models import resnet18 as ResNet18
     from libauc.losses import AUCMLoss
     from torch.nn import BCELoss 
     from torch.optim import SGD
+    from torch.optim import Adam
     from libauc.optimizers import PESG 
     net = ResNet18(pretrained=False) 
-    net = net.cuda()  
-
-    # rest of your code...
-
-    from libauc.models import resnet18 as ResNet18
-    from libauc.losses import AUCMLoss
-    from torch.nn import BCELoss 
-    from torch.optim import SGD
-    from libauc.optimizers import PESG 
-    net = ResNet18(pretrained=False) 
-    net = net.cuda()  
+    net = net.cuda()
     
     if args.loss == "CrossEntropy" or args.loss == "CE" or args.loss == "BCE":
         loss_fn = BCELoss() 
-        optimizer = SGD(net.parameters(), lr=0.1)
+        optimizer = Adam(net.parameters(), lr=0.001)
     elif args.loss == "AUCM":
         loss_fn = AUCMLoss()
         optimizer = PESG(net.parameters(), loss_fn=loss_fn, lr=args.lr, margin=args.margin)
-     
     if 1 != args.eval_only:
         epoch_aucs = train(net, train_loader, test_loader, loss_fn, optimizer, epochs=args.epochs)
         avg_auc = sum(epoch_aucs) / len(epoch_aucs)
@@ -123,27 +132,23 @@ def main_worker():
         net.load_state_dict(torch.load(args.saved_model_path)) 
         evaluate(net, test_loader) 
 
+from tqdm import tqdm
+
 def train(net, train_loader, test_loader, loss_fn, optimizer, epochs):
     epoch_aucs = []
     max_auc = 0
-    for e in range(epochs):
+    for e in tqdm(range(epochs), desc="Training"):
         net.train()
-        for data, targets in train_loader:
+        for i, (data, targets) in enumerate(train_loader):
             targets = targets.to(torch.float32)
-            #print("data[0].shape: " + str(data[0].shape))
-            #exit() 
             data, targets = data.cuda(), targets.cuda()
             logits = net(data)
             preds = torch.flatten(torch.sigmoid(logits))
             loss = loss_fn(preds, targets) 
-            #print("torch.sigmoid(logits):" + str(torch.sigmoid(logits)), flush=True)
-            #print("preds:" + str(preds), flush=True)
-            #print("targets:" + str(targets), flush=True)
             optimizer.zero_grad()
             loss.backward()
             optimizer.step()
         epoch_auc = evaluate(net, test_loader, epoch=e)
-        #save the model parameters that achieve the highest AUC score during the training process
         if epoch_auc > max_auc:
             max_auc = epoch_auc
             os.makedirs("saved_model", exist_ok=True)
