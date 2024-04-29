@@ -86,14 +86,20 @@ def main_worker():
         train_labels[train_labels != args.pos_class] = 99
         train_labels[train_labels == args.pos_class] = 1
         train_labels[train_labels == 99] = 0
+        
+        positive_class_count = (train_labels == 1).sum().item()
+        negative_class_count = (train_labels == 0).sum().item()
+
+        print(f"Positive class count: {positive_class_count}")
+        print(f"Negative class count: {negative_class_count}")
 
         train_data = train_data/255.0
         train_data = torch.tensor(train_data, dtype=torch.float32)
         train_labels = torch.tensor(train_labels) 
 
         train_dataset = dataset(train_data, train_labels, trans=train_transform)
-        
-        class_weights = [1, 564]
+
+        class_weights = [3, 8]
         sample_weights = [0] * len(train_dataset)
         
         for i, (data, label) in enumerate(train_dataset):
@@ -103,6 +109,16 @@ def main_worker():
         sampler = WeightedRandomSampler(sample_weights, len(sample_weights), replacement=True)
 
         train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=args.train_batchsize, sampler=sampler, num_workers=0)
+        
+        positive_class_count = 0
+        negative_class_count = 0
+
+        for data, labels in train_loader:
+            positive_class_count += (labels == 1).sum().item()
+            negative_class_count += (labels == 0).sum().item()
+
+        print(f"Positive class count after sampling: {positive_class_count}")
+        print(f"Negative class count after sampling: {negative_class_count}")
 
     from libauc.models import resnet18 as ResNet18
     from libauc.losses import AUCMLoss
@@ -136,15 +152,23 @@ def train(net, train_loader, test_loader, loss_fn, optimizer, epochs):
     max_auc = 0
     for e in tqdm(range(epochs), desc="Training"):
         net.train()
+        positive_class_count = 0
+        negative_class_count = 0
+
         for i, (data, targets) in enumerate(train_loader):
             targets = targets.to(torch.float32)
             data, targets = data.cuda(), targets.cuda()
+            positive_class_count += (targets == 1).sum().item()
+            negative_class_count += (targets == 0).sum().item()
             logits = net(data)
             preds = torch.flatten(torch.sigmoid(logits))
             loss = loss_fn(preds, targets) 
             optimizer.zero_grad()
             loss.backward()
             optimizer.step()
+        print(f"Positive class count: {positive_class_count}")
+        print(f"Negative class count: {negative_class_count}")
+
         epoch_auc = evaluate(net, test_loader, epoch=e)
         if epoch_auc > max_auc:
             max_auc = epoch_auc
