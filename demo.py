@@ -86,7 +86,7 @@ def main_worker():
         # print class counts at beggining
         positive_class_count = (train_labels == 1).sum().item()
         negative_class_count = (train_labels == 0).sum().item()
-        print(f"P/N class count at beggining: {positive_class_count}/{negative_class_count}")
+        #print(f"P/N class count at beggining: {positive_class_count}/{negative_class_count}")
 
         # default code
         train_data = train_data/255.0
@@ -111,8 +111,8 @@ def main_worker():
         for data, labels in train_loader:
             positive_class_count += (labels == 1).sum().item()
             negative_class_count += (labels == 0).sum().item()
-        print(f"Positive class count after sampling: {positive_class_count}")
-        print(f"Negative class count after sampling: {negative_class_count}")
+        #print(f"Positive class count after sampling: {positive_class_count}")
+        #print(f"Negative class count after sampling: {negative_class_count}")
 
     from libauc.models import resnet18 as ResNet18
     from libauc.losses import AUCMLoss
@@ -123,18 +123,18 @@ def main_worker():
     net = ResNet18(pretrained=False) 
     net = net.cuda()
     
+    weight_decay_value = .1
+    
     if args.loss == "CrossEntropy" or args.loss == "CE" or args.loss == "BCE":
         loss_fn = BCELoss() 
-        optimizer = SGD(net.parameters(), lr=0.1)
+        optimizer = Adam(net.parameters(), lr=0.001, weight_decay=weight_decay_value)
     elif args.loss == "AUCM":
         loss_fn = AUCMLoss()
-        optimizer = PESG(net.parameters(), loss_fn=loss_fn, lr=args.lr, margin=args.margin)
-        
+        optimizer = PESG(net.parameters(), loss_fn=loss_fn, lr=args.lr, margin=args.margin, weight_decay=weight_decay_value)
     if 1 != args.eval_only:
         epoch_aucs = train(net, train_loader, test_loader, loss_fn, optimizer, epochs=args.epochs)
         avg_auc = sum(epoch_aucs) / len(epoch_aucs)
         print(f"Average AUC over all epochs: {avg_auc}")
-    
     # to save a checkpoint in training: torch.save(net.state_dict(), "saved_model/test_model") 
     if 1 == args.eval_only: 
         net.load_state_dict(torch.load(args.saved_model_path)) 
@@ -163,7 +163,7 @@ def train(net, train_loader, test_loader, loss_fn, optimizer, epochs):
             loss.backward()
             optimizer.step()
 
-        print(f"Positive/Negative Class Count: {positive_class_count}/{negative_class_count}")
+        #print(f"Positive/Negative Class Count: {positive_class_count}/{negative_class_count}")
         epoch_auc = evaluate(net, test_loader, epoch=e)
         if epoch_auc > max_auc:
             max_auc = epoch_auc
